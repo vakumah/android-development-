@@ -215,15 +215,33 @@ app.post('/api/screenshot', async (req, res) => {
 
 app.get('/api/device-info', async (req, res) => {
   try {
+    const devices = await execAdb('devices -l');
     const [version, model, resolution] = await Promise.all([
       execAdb('shell getprop ro.build.version.release'),
       execAdb('shell getprop ro.product.model'),
       execAdb('shell wm size').then(r => r.split(': ')[1])
     ]);
     
-    res.json({ version, model, resolution });
+    res.json({ version, model, resolution, devices });
   } catch (error) {
-    res.status(500).json({ error: error.toString() });
+    res.status(500).json({ error: error.toString(), devices: 'No devices found' });
+  }
+});
+
+app.get('/api/emulator-status', async (req, res) => {
+  try {
+    const devices = await execAdb('devices');
+    const bootCompleted = await execAdb('shell getprop sys.boot_completed').catch(() => '0');
+    const bootAnim = await execAdb('shell getprop init.svc.bootanim').catch(() => 'unknown');
+    
+    res.json({ 
+      devices: devices.split('\n').filter(l => l && !l.includes('List of')),
+      bootCompleted: bootCompleted.trim() === '1',
+      bootAnim: bootAnim.trim(),
+      ready: bootCompleted.trim() === '1' && bootAnim.trim() === 'stopped'
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.toString(), ready: false });
   }
 });
 

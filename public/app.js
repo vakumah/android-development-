@@ -14,6 +14,37 @@ class AndroidTester {
     this.setupEventListeners();
     this.loadDeviceInfo();
     this.loadInstalledApps();
+    this.checkEmulatorStatus();
+  }
+
+  checkEmulatorStatus() {
+    const checkStatus = async () => {
+      try {
+        const response = await fetch('/api/emulator-status');
+        const status = await response.json();
+        
+        if (!status.ready) {
+          const statusEl = document.getElementById('status');
+          if (status.bootCompleted) {
+            statusEl.querySelector('span').textContent = 'Emulator booting (animation running)...';
+          } else {
+            statusEl.querySelector('span').textContent = 'Emulator starting up...';
+          }
+          statusEl.classList.remove('hidden');
+          
+          setTimeout(checkStatus, 3000);
+        } else {
+          this.hideStatus();
+          if (!this.ws || this.ws.readyState !== 1) {
+            this.setupWebSocket();
+          }
+        }
+      } catch (error) {
+        setTimeout(checkStatus, 5000);
+      }
+    };
+    
+    checkStatus();
   }
 
   setupWebSocket() {
