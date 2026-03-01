@@ -15,26 +15,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Start emulator dan web viewer
+      - name: Run Android Emulator ARM64 + Web Viewer
         uses: ReactiveCircus/android-emulator-runner@v2
         with:
           api-level: 31
-          target: google_apis
+          target: default
           arch: arm64-v8a
           profile: pixel_6
-          emulator-options: -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim
+          force-avd-creation: true
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim -no-snapshot
           script: |
+            adb wait-for-device
+
+            echo "Waiting for boot..."
+            while [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" != "1" ]; do
+              sleep 5
+            done
+            echo "Emulator booted"
+
             if [ -n "${{ inputs.apk_url }}" ]; then
               curl -L -o /tmp/app.apk "${{ inputs.apk_url }}"
               adb install -r /tmp/app.apk
             fi
 
-            git clone https://github.com/NetrisTV/ws-scrcpy.git /tmp/ws-scrcpy
+            git clone https://github.com/NetrisTV/ws-scrcpy.git /tmp/ws-scrcpy --depth 1
             cd /tmp/ws-scrcpy
             npm install
             npm start &
 
             brew install cloudflared
-            cloudflared tunnel --url http://localhost:8080 &
+            cloudflared tunnel --url http://localhost:8080 --no-autoupdate &
 
             sleep 21600
