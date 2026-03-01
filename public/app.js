@@ -18,16 +18,20 @@ class AndroidTester {
   setupWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     this.ws = new WebSocket(`${protocol}//${window.location.host}`);
-    this.ws.binaryType = 'blob';
 
     this.ws.onopen = () => {
       this.isConnected = true;
-      this.hideStatus();
+      this.showStatus('Screen streaming unavailable on this platform. Use APK install and shell commands for testing.');
     };
 
     this.ws.onmessage = (event) => {
-      if (event.data instanceof Blob) {
-        this.handleFrame(event.data);
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'info') {
+          this.showStatus(data.message);
+        }
+      } catch (e) {
+        // Ignore
       }
     };
 
@@ -40,22 +44,6 @@ class AndroidTester {
     this.ws.onerror = () => {
       this.showStatus('Connection error');
     };
-  }
-
-  handleFrame(blob) {
-    const img = new Image();
-    const url = URL.createObjectURL(blob);
-    
-    img.onload = () => {
-      if (this.canvas.width !== img.width || this.canvas.height !== img.height) {
-        this.canvas.width = img.width;
-        this.canvas.height = img.height;
-      }
-      this.ctx.drawImage(img, 0, 0);
-      URL.revokeObjectURL(url);
-    };
-    
-    img.src = url;
   }
 
   setupEventListeners() {

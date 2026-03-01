@@ -21,7 +21,6 @@ app.use(express.json());
 app.use(express.static(join(__dirname, '../public')));
 
 let videoClients = new Set();
-let frameInterval = null;
 
 function execAdb(command) {
   return new Promise((resolve, reject) => {
@@ -35,44 +34,11 @@ function execAdb(command) {
   });
 }
 
-function startScreencast() {
-  if (frameInterval) return;
-
-  let frameCount = 0;
-  frameInterval = setInterval(async () => {
-    if (videoClients.size === 0) return;
-
-    try {
-      frameCount++;
-      const tmpFile = `/tmp/screen_${frameCount % 2}.png`;
-      
-      const { exec } = await import('child_process');
-      const { promisify } = await import('util');
-      const execPromise = promisify(exec);
-      
-      await execPromise(`adb -s ${ADB_DEVICE} exec-out screencap -p > ${tmpFile}`, { timeout: 3000 });
-      
-      if (existsSync(tmpFile)) {
-        const frame = readFileSync(tmpFile);
-        
-        videoClients.forEach(client => {
-          if (client.readyState === 1) {
-            client.send(frame);
-          }
-        });
-      }
-    } catch (err) {
-      // Silent fail to avoid spam
-    }
-  }, 300);
-}
-
 wss.on('connection', (ws) => {
-  videoClients.add(ws);
-  
-  if (!frameInterval) {
-    startScreencast();
-  }
+  ws.send(JSON.stringify({ 
+    type: 'info',
+    message: 'Screen streaming unavailable. Use APK install and shell commands.' 
+  }));
 
   ws.on('message', async (message) => {
     try {
@@ -99,11 +65,7 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    videoClients.delete(ws);
-    if (videoClients.size === 0 && frameInterval) {
-      clearInterval(frameInterval);
-      frameInterval = null;
-    }
+    // Cleanup
   });
 });
 
