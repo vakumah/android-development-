@@ -44,13 +44,16 @@ function startScreencast() {
 
     try {
       frameCount++;
-      const tmpFile = `/tmp/screen_${frameCount}.png`;
+      const tmpFile = `/tmp/screen_${frameCount % 2}.png`;
       
-      await execAdb(`exec-out screencap -p > ${tmpFile}`);
+      const { exec } = await import('child_process');
+      const { promisify } = await import('util');
+      const execPromise = promisify(exec);
+      
+      await execPromise(`adb -s ${ADB_DEVICE} exec-out screencap -p > ${tmpFile}`, { timeout: 3000 });
       
       if (existsSync(tmpFile)) {
         const frame = readFileSync(tmpFile);
-        unlinkSync(tmpFile);
         
         videoClients.forEach(client => {
           if (client.readyState === 1) {
@@ -59,9 +62,9 @@ function startScreencast() {
         });
       }
     } catch (err) {
-      console.error('Screencast error:', err.message);
+      // Silent fail to avoid spam
     }
-  }, 200);
+  }, 300);
 }
 
 wss.on('connection', (ws) => {
@@ -170,7 +173,11 @@ app.post('/api/clear-data', async (req, res) => {
 app.post('/api/screenshot', async (req, res) => {
   try {
     const tmpFile = `/tmp/screenshot_${Date.now()}.png`;
-    await execAdb(`exec-out screencap -p > ${tmpFile}`);
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execPromise = promisify(exec);
+    
+    await execPromise(`adb -s ${ADB_DEVICE} exec-out screencap -p > ${tmpFile}`, { timeout: 5000 });
     
     if (existsSync(tmpFile)) {
       const image = readFileSync(tmpFile);
