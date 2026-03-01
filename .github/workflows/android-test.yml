@@ -1,61 +1,47 @@
-name: Android ARM64 Emulator
+name: Coba Emulator ARM64 via Bore
 
 on:
-  workflow_dispatch:
-    inputs:
-      apk_url:
-        description: 'URL APK yang mau diinstall (opsional)'
-        required: false
-        type: string
+  workflow_dispatch:  # Bisa dijalankan manual dari tab Actions
 
 jobs:
-  emulator:
-    runs-on: macos-15-large
+  run-emulator-arm64:
+    # Gunakan partner runner ARM64 (gratis untuk publik)
+    runs-on: ubuntu-24.04-arm   # atau ubuntu-22.04-arm
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - name: Run Android Emulator ARM64 + Web Viewer
-        uses: ReactiveCircus/android-emulator-runner@v2
+      # Install dan jalankan bore untuk membuka tunnel ADB port 5555 ke publik
+      - name: Install and Run Bore
+        run: |
+          wget -q https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-unknown-linux-musl.tar.gz
+          tar -xzf bore-v0.5.1-x86_64-unknown-linux-musl.tar.gz
+          chmod +x bore
+          # Jalankan bore di background, tunnelkan port 5555 (default ADB)
+          ./bore local 5555 --to bore.pub > bore_log.txt 2>&1 &
+          sleep 5
+          # Tampilkan informasi tunnel (misal: bore.pub:12345)
+          cat bore_log.txt | grep "listening at"
+
+      # Jalankan emulator Android ARM64 dengan target default
+      - name: Start Android Emulator (ARM64)
+        uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 31
-          target: default
+          api-level: 30
           arch: arm64-v8a
-          profile: pixel_6
-          cores: 4
-          force-avd-creation: true
-          disable-animations: true
-          hardware-acceleration: software
-          emulator-options: -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim -no-snapshot -no-metrics
+          target: default                # menggunakan image default (tanpa Google APIs)
+          emulator-options: -no-window -no-snapshot-save -noaudio -no-boot-anim
           script: |
+            # Tunggu hingga emulator benar-benar boot
+            echo "Menunggu emulator selesai boot..."
             adb wait-for-device
-
-            echo "Menunggu boot selesai (bisa 8-15 menit karena software mode)..."
-            for i in {1..90}; do
-              boot=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
-              if [ "$boot" = "1" ]; then
-                echo "✅ Emulator boot berhasil!"
-                break
-              fi
-              echo "Boot progress: $i/90 (~$((i*10)) detik)"
+            while [ -z "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" ]; do
               sleep 10
             done
-
-            if [ -n "${{ inputs.apk_url }}" ]; then
-              echo "Installing APK..."
-              curl -L -o /tmp/app.apk "${{ inputs.apk_url }}"
-              adb install -r /tmp/app.apk
-            fi
-
-            echo "Starting ws-scrcpy web viewer..."
-            git clone https://github.com/NetrisTV/ws-scrcpy.git /tmp/ws-scrcpy --depth 1
-            cd /tmp/ws-scrcpy
-            npm install
-            npm start &
-
-            echo "Starting Cloudflared tunnel..."
-            brew install cloudflared
-            cloudflared tunnel --url http://localhost:8080 --no-autoupdate &
-
-            echo "✅ Semua siap! Scroll log ini cari link https://xxxx.trycloudflare.com"
-            sleep 21600
+            echo "Emulator telah boot!"
+            # Beri waktu tambahan agar sistem benar-benar siap
+            sleep 30
+            # Biarkan emulator tetap hidup selama 1 jam (sesuai permintaan awal)
+            echo "Emulator siap digunakan. Menjaga tetap hidup selama 3600 detik..."
+            sleep 3600
