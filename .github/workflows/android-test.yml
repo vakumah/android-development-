@@ -28,36 +28,45 @@ jobs:
           docker run -itd --rm --privileged \
             --name redroid \
             -p 5555:5555 \
-            redroid/redroid:12.0.0-latest \
-            androidboot.redroid_gpu_mode=guest \
-            androidboot.redroid_fps=30 \
+            redroid/redroid:11.0.0-latest \
             androidboot.use_memfd=true \
-            ro.kernel.qemu=1
+            androidboot.redroid_gpu_mode=guest
           
-          echo "Waiting for Android to boot..."
-          for i in {1..30}; do
+          echo "Waiting for container to start..."
+          sleep 10
+          
+          echo "Checking container status..."
+          docker ps -a
+          
+          echo "Container logs:"
+          docker logs redroid
+          
+          echo "Connecting ADB..."
+          for i in {1..40}; do
             adb connect 127.0.0.1:5555 2>/dev/null || true
+            sleep 3
+            
             STATUS=$(adb -s 127.0.0.1:5555 get-state 2>/dev/null || echo "offline")
+            echo "Attempt $i/40 - Status: $STATUS"
             
             if [ "$STATUS" == "device" ]; then
-              echo "Android ready"
+              echo "Android is ready!"
               adb -s 127.0.0.1:5555 shell getprop ro.build.version.release
               break
             fi
             
-            if [ $i -eq 30 ]; then
-              echo "Timeout waiting for Android. Container logs:"
-              docker logs redroid --tail 50
+            if [ $i -eq 40 ]; then
+              echo "Failed to boot Android. Full logs:"
+              docker logs redroid
               exit 1
             fi
-            
-            echo "Attempt $i/30..."
-            sleep 5
           done
           
+          echo "Configuring Android settings..."
           adb -s 127.0.0.1:5555 shell settings put global window_animation_scale 0.5
           adb -s 127.0.0.1:5555 shell settings put global transition_animation_scale 0.5
           adb -s 127.0.0.1:5555 shell settings put system screen_off_timeout 1800000
+          echo "Android configured successfully"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
