@@ -20,7 +20,8 @@ jobs:
           docker run -d --privileged \
             --name redroid \
             -p 5555:5555 \
-            redroid/redroid:12.0.0-latest \
+            --platform linux/amd64 \
+            redroid/redroid:12.0.0 \
             androidboot.hardware=redroid \
             androidboot.redroid_gpu_mode=guest \
             ro.product.cpu.abilist=x86_64,arm64-v8a,x86,armeabi-v7a,armeabi \
@@ -28,13 +29,23 @@ jobs:
             ro.product.cpu.abilist32=x86,armeabi-v7a,armeabi \
             ro.enable.native.bridge.exec=1 \
             ro.dalvik.vm.native.bridge=libndk_translation.so
-      - name: Wait for ADB
+      - name: Install ADB
         run: |
-          sudo apt update && sudo apt install -y adb
-          timeout 300 bash -c 'until adb connect localhost:5555 > /dev/null 2>&1; do sleep 5; done'
+          sudo apt update
+          sudo apt install -y adb
+      - name: Wait for device online
+        run: |
+          echo "Waiting for container to start..."
+          sleep 20
+          adb connect localhost:5555
+          timeout 300 bash -c 'until adb devices | grep -w "device"; do sleep 5; adb connect localhost:5555; done'
+          adb devices
       - name: Test ARM binary
         run: |
           adb shell getprop ro.product.cpu.abi
           adb shell ls /system/lib64/libndk_translation* || echo 'NDK translation not found'
       - name: Keep alive
         run: sleep 3600
+      - name: Check container logs
+        if: always()
+        run: docker logs redroid
