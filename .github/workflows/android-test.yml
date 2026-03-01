@@ -23,11 +23,25 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y adb wget
 
+      - name: Setup Binder
+        run: |
+          echo "Checking kernel modules..."
+          ls -la /dev/ | grep binder || echo "No binder devices found"
+          
+          echo "Trying to create binder devices..."
+          sudo mkdir -p /dev/binderfs
+          sudo mount -t binder binder /dev/binderfs 2>/dev/null || echo "Cannot mount binderfs"
+          
+          echo "Creating device nodes..."
+          sudo mknod /dev/binder c 10 0 2>/dev/null || echo "Cannot create binder node"
+          sudo chmod 666 /dev/binder 2>/dev/null || true
+
       - name: Start Android Container
         run: |
           docker run -itd --rm --privileged \
             --name redroid \
             -p 5555:5555 \
+            -v /dev:/dev \
             redroid/redroid:11.0.0-latest \
             androidboot.use_memfd=true \
             androidboot.redroid_gpu_mode=guest
@@ -73,10 +87,10 @@ jobs:
           done
           
           echo "Configuring Android settings..."
-          adb -s 127.0.0.1:5555 shell settings put global window_animation_scale 0.5
-          adb -s 127.0.0.1:5555 shell settings put global transition_animation_scale 0.5
-          adb -s 127.0.0.1:5555 shell settings put system screen_off_timeout 1800000
-          echo "✓ Android configured successfully"
+          adb -s 127.0.0.1:5555 shell "settings put global window_animation_scale 0.5 2>/dev/null || echo 'Skip animation settings'"
+          adb -s 127.0.0.1:5555 shell "settings put global transition_animation_scale 0.5 2>/dev/null || echo 'Skip transition settings'"
+          adb -s 127.0.0.1:5555 shell "settings put system screen_off_timeout 1800000 2>/dev/null || echo 'Skip timeout settings'"
+          echo "✓ Android configured (some settings may be skipped)"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
