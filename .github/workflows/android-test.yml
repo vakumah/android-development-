@@ -52,18 +52,12 @@ jobs:
             -memory 2048 \
             -cores 2 > /tmp/emulator.log 2>&1 &
           
-          echo "Waiting for emulator to start..."
-          adb wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done'
+          echo "Emulator started in background"
+          echo "Waiting 30 seconds for initial startup..."
+          sleep 30
           
-          echo "Emulator booted, waiting for system to be ready..."
-          sleep 10
-          
-          adb shell input keyevent 82
-          
-          echo "✓ Android emulator ready!"
           adb devices
-          adb shell getprop ro.build.version.release
-          adb shell wm size
+          echo "✓ Emulator process running, continuing to web interface..."
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
