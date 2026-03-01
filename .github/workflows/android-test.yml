@@ -1,0 +1,93 @@
+name: Android Testing Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_minutes:
+        description: 'Runtime duration (minutes)'
+        required: false
+        default: '60'
+        type: string
+
+jobs:
+  android-test:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y adb wget
+
+      - name: Start Android Container
+        run: |
+          docker run -itd --rm --privileged \
+            --name redroid \
+            -p 5555:5555 \
+            redroid/redroid:12.0.0-latest \
+            androidboot.redroid_gpu_mode=guest \
+            androidboot.redroid_fps=30
+          
+          for i in {1..20}; do
+            adb connect 127.0.0.1:5555 || true
+            STATUS=$(adb -s 127.0.0.1:5555 get-state 2>/dev/null || echo "offline")
+            
+            if [ "$STATUS" == "device" ]; then
+              echo "Android ready"
+              break
+            fi
+            sleep 3
+          done
+          
+          adb -s 127.0.0.1:5555 shell settings put global window_animation_scale 0.5
+          adb -s 127.0.0.1:5555 shell settings put global transition_animation_scale 0.5
+          adb -s 127.0.0.1:5555 shell settings put system screen_off_timeout 1800000
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Application
+        run: npm install
+
+      - name: Start Server & Tunnel
+        run: |
+          npm start &
+          sleep 5
+          
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64 -O cloudflared
+          chmod +x cloudflared
+          ./cloudflared tunnel --url http://localhost:8000 > tunnel.log 2>&1 &
+          
+          sleep 5
+          
+          for i in {1..15}; do
+            URL=$(grep -o 'https://[-a-zA-Z0-9]*\.trycloudflare\.com' tunnel.log | head -n 1)
+            if [ ! -z "$URL" ]; then
+              break
+            fi
+            sleep 2
+          done
+          
+          echo ""
+          echo "=========================================="
+          echo "Android Testing Environment"
+          echo "=========================================="
+          echo "URL: $URL"
+          echo "Runtime: ${{ inputs.runtime_minutes }} minutes"
+          echo "=========================================="
+          echo ""
+          
+          RUNTIME_SECONDS=$(($${{ inputs.runtime_minutes }} * 60))
+          sleep $RUNTIME_SECONDS
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker stop redroid 2>/dev/null || true
+          adb disconnect 127.0.0.1:5555 2>/dev/null || true

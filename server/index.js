@@ -1,0 +1,207 @@
+import express from 'express';
+import { WebSocketServer } from 'ws';
+import { createServer } from 'http';
+import multer from 'multer';
+import { spawn, exec } from 'child_process';
+import { readFileSync, unlinkSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const app = express();
+const server = createServer(app);
+const wss = new WebSocketServer({ server });
+
+const ADB_DEVICE = '127.0.0.1:5555';
+const PORT = 8000;
+
+const upload = multer({ dest: '/tmp/' });
+
+app.use(express.json());
+app.use(express.static(join(__dirname, '../public')));
+
+let screencastProcess = null;
+let videoClients = new Set();
+let frameInterval = null;
+
+function execAdb(command) {
+  return new Promise((resolve, reject) => {
+    exec(`adb -s ${ADB_DEVICE} ${command}`, (error, stdout, stderr) => {
+      if (error) {
+        reject(stderr || error.message);
+      } else {
+        resolve(stdout.trim());
+      }
+    });
+  });
+}
+
+function startScreencast() {
+  if (frameInterval) return;
+
+  frameInterval = setInterval(async () => {
+    if (videoClients.size === 0) return;
+
+    try {
+      await execAdb('shell screencap -p /sdcard/screen.png');
+      await execAdb('pull /sdcard/screen.png /tmp/screen.png');
+      
+      const frame = readFileSync('/tmp/screen.png');
+      
+      videoClients.forEach(client => {
+        if (client.readyState === 1) {
+          client.send(frame);
+        }
+      });
+    } catch (err) {
+      console.error('Screencast error:', err);
+    }
+  }, 100);
+}
+
+wss.on('connection', (ws) => {
+  videoClients.add(ws);
+  
+  if (!frameInterval) {
+    startScreencast();
+  }
+
+  ws.on('message', async (message) => {
+    try {
+      const data = JSON.parse(message);
+      
+      switch (data.type) {
+        case 'touch':
+          await execAdb(`shell input tap ${data.x} ${data.y}`);
+          break;
+        case 'swipe':
+          await execAdb(`shell input swipe ${data.x1} ${data.y1} ${data.x2} ${data.y2} ${data.duration || 300}`);
+          break;
+        case 'key':
+          await execAdb(`shell input keyevent ${data.code}`);
+          break;
+        case 'text':
+          const escaped = data.text.replace(/[&|;<>()$`\\"']/g, '\\$&').replace(/ /g, '%s');
+          await execAdb(`shell input text "${escaped}"`);
+          break;
+      }
+    } catch (err) {
+      ws.send(JSON.stringify({ error: err.toString() }));
+    }
+  });
+
+  ws.on('close', () => {
+    videoClients.delete(ws);
+    if (videoClients.size === 0 && frameInterval) {
+      clearInterval(frameInterval);
+      frameInterval = null;
+    }
+  });
+});
+
+app.post('/api/install', upload.single('apk'), async (req, res) => {
+  try {
+    const apkPath = req.file.path;
+    await execAdb(`install -r ${apkPath}`);
+    unlinkSync(apkPath);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.toString() });
+  }
+});
+
+app.post('/api/install-url', async (req, res) => {
+  try {
+    const { url } = req.body;
+    const apkPath = '/tmp/app.apk';
+    
+    await new Promise((resolve, reject) => {
+      exec(`wget -q "${url}" -O ${apkPath}`, (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+    
+    await execAdb(`install -r ${apkPath}`);
+    unlinkSync(apkPath);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.toString() });
+  }
+});
+
+app.get('/api/packages', async (req, res) => {
+  try {
+    const output = await execAdb('shell pm list packages -3');
+    const packages = output.split('\n')
+      .map(line => line.replace('package:', ''))
+      .filter(Boolean);
+    res.json({ packages });
+  } catch (error) {
+    res.status(500).json({ error: error.toString() });
+  }
+});
+
+app.post('/api/uninstall', async (req, res) => {
+  try {
+    const { package: pkg } = req.body;
+    await execAdb(`uninstall ${pkg}`);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.toString() });
+  }
+});
+
+app.post('/api/clear-data', async (req, res) => {
+  try {
+    const { package: pkg } = req.body;
+    await execAdb(`shell pm clear ${pkg}`);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.toString() });
+  }
+});
+
+app.post('/api/screenshot', async (req, res) => {
+  try {
+    await execAdb('shell screencap -p /sdcard/screenshot.png');
+    await execAdb('pull /sdcard/screenshot.png /tmp/screenshot.png');
+    await execAdb('shell rm /sdcard/screenshot.png');
+    
+    const image = readFileSync('/tmp/screenshot.png');
+    unlinkSync('/tmp/screenshot.png');
+    
+    res.set('Content-Type', 'image/png');
+    res.send(image);
+  } catch (error) {
+    res.status(500).json({ error: error.toString() });
+  }
+});
+
+app.get('/api/device-info', async (req, res) => {
+  try {
+    const [version, model, resolution] = await Promise.all([
+      execAdb('shell getprop ro.build.version.release'),
+      execAdb('shell getprop ro.product.model'),
+      execAdb('shell wm size').then(r => r.split(': ')[1])
+    ]);
+    
+    res.json({ version, model, resolution });
+  } catch (error) {
+    res.status(500).json({ error: error.toString() });
+  }
+});
+
+app.post('/api/shell', async (req, res) => {
+  try {
+    const { command } = req.body;
+    const output = await execAdb(`shell ${command}`);
+    res.json({ output });
+  } catch (error) {
+    res.status(500).json({ error: error.toString() });
+  }
+});
+
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
