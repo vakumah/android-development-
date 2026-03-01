@@ -19,8 +19,8 @@ jobs:
         run: |
           docker run -d --privileged \
             --name redroid \
-            -v /dev/mali0:/dev/mali0 \
             -p 5555:5555 \
+            --platform linux/amd64 \
             redroid/redroid:12.0.0 \
             androidboot.hardware=redroid \
             androidboot.redroid_gpu_mode=guest \
