@@ -1,47 +1,23 @@
-name: Coba Emulator ARM64 via Bore
+name: Uji ARM64
 
-on:
-  workflow_dispatch:  # Bisa dijalankan manual dari tab Actions
+on: workflow_dispatch
 
 jobs:
-  run-emulator-arm64:
-    # Gunakan partner runner ARM64 (gratis untuk publik)
-    runs-on: ubuntu-24.04-arm   # atau ubuntu-22.04-arm
-
+  test:
+    runs-on: ubuntu-24.04-arm
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      # Install dan jalankan bore untuk membuka tunnel ADB port 5555 ke publik
-      - name: Install and Run Bore
-        run: |
-          wget -q https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-unknown-linux-musl.tar.gz
-          tar -xzf bore-v0.5.1-x86_64-unknown-linux-musl.tar.gz
-          chmod +x bore
-          # Jalankan bore di background, tunnelkan port 5555 (default ADB)
-          ./bore local 5555 --to bore.pub > bore_log.txt 2>&1 &
-          sleep 5
-          # Tampilkan informasi tunnel (misal: bore.pub:12345)
-          cat bore_log.txt | grep "listening at"
-
-      # Jalankan emulator Android ARM64 dengan target default
-      - name: Start Android Emulator (ARM64)
+      - uses: actions/checkout@v4
+      - name: Run emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
           arch: arm64-v8a
-          target: default                # menggunakan image default (tanpa Google APIs)
+          target: default
           emulator-options: -no-window -no-snapshot-save -noaudio -no-boot-anim
           script: |
-            # Tunggu hingga emulator benar-benar boot
-            echo "Menunggu emulator selesai boot..."
             adb wait-for-device
-            while [ -z "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" ]; do
+            while [ -z "$(adb shell getprop sys.boot_completed | tr -d '\r')" ]; do
               sleep 10
             done
-            echo "Emulator telah boot!"
-            # Beri waktu tambahan agar sistem benar-benar siap
-            sleep 30
-            # Biarkan emulator tetap hidup selama 1 jam (sesuai permintaan awal)
-            echo "Emulator siap digunakan. Menjaga tetap hidup selama 3600 detik..."
-            sleep 3600
+            echo "Boot selesai"
+            adb shell getprop ro.product.cpu.abi
