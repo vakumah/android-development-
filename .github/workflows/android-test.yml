@@ -1,23 +1,39 @@
-name: Uji ARM64
+name: Android 12 ARM Translation via ReDroid
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
 
 jobs:
-  test:
-    runs-on: ubuntu-24.04-arm
+  redroid:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 30
-          arch: arm64-v8a
-          target: default
-          emulator-options: -no-window -no-snapshot-save -noaudio -no-boot-anim
-          script: |
-            adb wait-for-device
-            while [ -z "$(adb shell getprop sys.boot_completed | tr -d '\r')" ]; do
-              sleep 10
-            done
-            echo "Boot selesai"
-            adb shell getprop ro.product.cpu.abi
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Setup binfmt for QEMU
+        run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+      - name: Run ReDroid container
+        run: |
+          docker run -d --privileged \
+            --name redroid \
+            -v /dev/mali0:/dev/mali0 \
+            -p 5555:5555 \
+            redroid/redroid:12.0.0 \
+            androidboot.hardware=redroid \
+            androidboot.redroid_gpu_mode=guest \
+            ro.product.cpu.abilist=arm64-v8a,armeabi-v7a,armeabi \
+            ro.product.cpu.abilist64=arm64-v8a \
+            ro.product.cpu.abilist32=armeabi-v7a,armeabi
+      - name: Wait for ADB
+        run: |
+          sudo apt update && sudo apt install -y adb
+          timeout 300 bash -c 'until adb connect localhost:5555 > /dev/null 2>&1; do sleep 5; done'
+      - name: Test ARM binary
+        run: |
+          adb shell getprop ro.product.cpu.abi
+          adb shell ls /system/lib64/libndk_translation* || echo 'NDK translation not found'
+      - name: Keep alive
+        run: sleep 3600
