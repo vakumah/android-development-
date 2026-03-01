@@ -32,32 +32,42 @@ jobs:
             androidboot.use_memfd=true \
             androidboot.redroid_gpu_mode=guest
           
-          echo "Waiting for container to start..."
-          sleep 10
+          echo "Waiting for container to initialize..."
+          sleep 15
           
-          echo "Checking container status..."
-          docker ps -a
+          echo "Starting ADB daemon inside container..."
+          docker exec redroid sh -c "setprop service.adb.tcp.port 5555 && stop adbd && start adbd" || true
+          sleep 5
           
-          echo "Container logs:"
-          docker logs redroid
+          echo "Checking if ADB port is listening..."
+          docker exec redroid netstat -tuln | grep 5555 || echo "Port 5555 not listening yet"
           
           echo "Connecting ADB..."
-          for i in {1..40}; do
-            adb connect 127.0.0.1:5555 2>/dev/null || true
-            sleep 3
+          for i in {1..30}; do
+            adb connect 127.0.0.1:5555 2>&1 | grep -v "already connected" || true
+            sleep 2
             
             STATUS=$(adb -s 127.0.0.1:5555 get-state 2>/dev/null || echo "offline")
-            echo "Attempt $i/40 - Status: $STATUS"
             
             if [ "$STATUS" == "device" ]; then
-              echo "Android is ready!"
+              echo "✓ Android is ready!"
               adb -s 127.0.0.1:5555 shell getprop ro.build.version.release
               break
             fi
             
-            if [ $i -eq 40 ]; then
-              echo "Failed to boot Android. Full logs:"
-              docker logs redroid
+            if [ $((i % 5)) -eq 0 ]; then
+              echo "Attempt $i/30 - Status: $STATUS"
+              docker exec redroid sh -c "setprop service.adb.tcp.port 5555 && stop adbd && start adbd" 2>/dev/null || true
+            fi
+            
+            if [ $i -eq 30 ]; then
+              echo "Failed to boot Android. Diagnostics:"
+              echo "=== Container Status ==="
+              docker ps -a
+              echo "=== Container Logs ==="
+              docker logs redroid --tail 100
+              echo "=== ADB Devices ==="
+              adb devices -l
               exit 1
             fi
           done
@@ -66,7 +76,7 @@ jobs:
           adb -s 127.0.0.1:5555 shell settings put global window_animation_scale 0.5
           adb -s 127.0.0.1:5555 shell settings put global transition_animation_scale 0.5
           adb -s 127.0.0.1:5555 shell settings put system screen_off_timeout 1800000
-          echo "Android configured successfully"
+          echo "✓ Android configured successfully"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
