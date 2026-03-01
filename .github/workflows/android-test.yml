@@ -10,7 +10,7 @@ on:
 
 jobs:
   emulator:
-    runs-on: macos-15
+    runs-on: macos-15-large
 
     steps:
       - uses: actions/checkout@v4
@@ -22,36 +22,40 @@ jobs:
           target: default
           arch: arm64-v8a
           profile: pixel_6
+          cores: 4
           force-avd-creation: true
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim -no-snapshot -accel off -no-metrics
+          hardware-acceleration: software
+          emulator-options: -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim -no-snapshot -no-metrics
           script: |
             adb wait-for-device
 
-            echo "Menunggu boot selesai..."
-            timeout=300
-            while [ $timeout -gt 0 ] && [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" != "1" ]; do
-              sleep 8
-              timeout=$((timeout-8))
+            echo "Menunggu boot selesai (bisa 8-15 menit karena software mode)..."
+            for i in {1..90}; do
+              boot=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+              if [ "$boot" = "1" ]; then
+                echo "✅ Emulator boot berhasil!"
+                break
+              fi
+              echo "Boot progress: $i/90 (~$((i*10)) detik)"
+              sleep 10
             done
 
-            if [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ]; then
-              echo "Emulator berhasil boot"
-            else
-              echo "Boot timeout, lanjut saja"
-            fi
-
             if [ -n "${{ inputs.apk_url }}" ]; then
+              echo "Installing APK..."
               curl -L -o /tmp/app.apk "${{ inputs.apk_url }}"
               adb install -r /tmp/app.apk
             fi
 
+            echo "Starting ws-scrcpy web viewer..."
             git clone https://github.com/NetrisTV/ws-scrcpy.git /tmp/ws-scrcpy --depth 1
             cd /tmp/ws-scrcpy
             npm install
             npm start &
 
+            echo "Starting Cloudflared tunnel..."
             brew install cloudflared
             cloudflared tunnel --url http://localhost:8080 --no-autoupdate &
 
+            echo "✅ Semua siap! Scroll log ini cari link https://xxxx.trycloudflare.com"
             sleep 21600
