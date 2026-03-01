@@ -103,11 +103,13 @@ jobs:
       - name: Start Server & Tunnel
         run: |
           npm start &
+          SERVER_PID=$!
           sleep 5
           
           wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64 -O cloudflared
           chmod +x cloudflared
           ./cloudflared tunnel --url http://localhost:8000 > tunnel.log 2>&1 &
+          TUNNEL_PID=$!
           
           sleep 5
           
@@ -128,8 +130,14 @@ jobs:
           echo "=========================================="
           echo ""
           
-          RUNTIME_SECONDS=$(($${{ inputs.runtime_minutes }} * 60))
+          RUNTIME_SECONDS=$((${{ inputs.runtime_minutes }} * 60))
+          echo "Holding environment for ${{ inputs.runtime_minutes }} minutes..."
+          echo "Press Cancel Workflow button to stop early"
+          
           sleep $RUNTIME_SECONDS
+          
+          echo "Runtime expired, cleaning up..."
+          kill $SERVER_PID $TUNNEL_PID 2>/dev/null || true
 
       - name: Cleanup
         if: always()
