@@ -24,15 +24,22 @@ jobs:
           profile: pixel_6
           force-avd-creation: true
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim -no-snapshot
+          emulator-options: -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim -no-snapshot -accel tcg -no-metrics
           script: |
             adb wait-for-device
 
-            echo "Waiting for boot..."
-            while [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" != "1" ]; do
-              sleep 5
+            echo "Menunggu boot selesai..."
+            timeout=300
+            while [ $timeout -gt 0 ] && [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" != "1" ]; do
+              sleep 8
+              timeout=$((timeout-8))
             done
-            echo "Emulator booted"
+
+            if [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ]; then
+              echo "Emulator berhasil boot"
+            else
+              echo "Boot timeout, lanjut saja"
+            fi
 
             if [ -n "${{ inputs.apk_url }}" ]; then
               curl -L -o /tmp/app.apk "${{ inputs.apk_url }}"
