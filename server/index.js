@@ -3,7 +3,7 @@ import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import multer from 'multer';
 import { spawn, exec } from 'child_process';
-import { readFileSync, unlinkSync, existsSync } from 'fs';
+import { readFileSync, unlinkSync, existsSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -20,13 +20,12 @@ const upload = multer({ dest: '/tmp/' });
 app.use(express.json());
 app.use(express.static(join(__dirname, '../public')));
 
-let screencastProcess = null;
 let videoClients = new Set();
 let frameInterval = null;
 
 function execAdb(command) {
   return new Promise((resolve, reject) => {
-    exec(`adb -s ${ADB_DEVICE} ${command}`, (error, stdout, stderr) => {
+    exec(`adb -s ${ADB_DEVICE} ${command}`, { timeout: 5000 }, (error, stdout, stderr) => {
       if (error) {
         reject(stderr || error.message);
       } else {
@@ -39,24 +38,30 @@ function execAdb(command) {
 function startScreencast() {
   if (frameInterval) return;
 
+  let frameCount = 0;
   frameInterval = setInterval(async () => {
     if (videoClients.size === 0) return;
 
     try {
-      await execAdb('shell screencap -p /sdcard/screen.png');
-      await execAdb('pull /sdcard/screen.png /tmp/screen.png');
+      frameCount++;
+      const tmpFile = `/tmp/screen_${frameCount}.png`;
       
-      const frame = readFileSync('/tmp/screen.png');
+      await execAdb(`exec-out screencap -p > ${tmpFile}`);
       
-      videoClients.forEach(client => {
-        if (client.readyState === 1) {
-          client.send(frame);
-        }
-      });
+      if (existsSync(tmpFile)) {
+        const frame = readFileSync(tmpFile);
+        unlinkSync(tmpFile);
+        
+        videoClients.forEach(client => {
+          if (client.readyState === 1) {
+            client.send(frame);
+          }
+        });
+      }
     } catch (err) {
-      console.error('Screencast error:', err);
+      console.error('Screencast error:', err.message);
     }
-  }, 100);
+  }, 200);
 }
 
 wss.on('connection', (ws) => {
@@ -164,15 +169,18 @@ app.post('/api/clear-data', async (req, res) => {
 
 app.post('/api/screenshot', async (req, res) => {
   try {
-    await execAdb('shell screencap -p /sdcard/screenshot.png');
-    await execAdb('pull /sdcard/screenshot.png /tmp/screenshot.png');
-    await execAdb('shell rm /sdcard/screenshot.png');
+    const tmpFile = `/tmp/screenshot_${Date.now()}.png`;
+    await execAdb(`exec-out screencap -p > ${tmpFile}`);
     
-    const image = readFileSync('/tmp/screenshot.png');
-    unlinkSync('/tmp/screenshot.png');
-    
-    res.set('Content-Type', 'image/png');
-    res.send(image);
+    if (existsSync(tmpFile)) {
+      const image = readFileSync(tmpFile);
+      unlinkSync(tmpFile);
+      
+      res.set('Content-Type', 'image/png');
+      res.send(image);
+    } else {
+      throw new Error('Screenshot file not created');
+    }
   } catch (error) {
     res.status(500).json({ error: error.toString() });
   }
