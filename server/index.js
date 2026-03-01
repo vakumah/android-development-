@@ -12,7 +12,7 @@ const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
-const ADB_DEVICE = '127.0.0.1:5555';
+const ADB_DEVICE = '';
 const PORT = 8000;
 
 const upload = multer({ dest: '/tmp/' });
@@ -21,10 +21,12 @@ app.use(express.json());
 app.use(express.static(join(__dirname, '../public')));
 
 let videoClients = new Set();
+let scrcpyProcess = null;
 
 function execAdb(command) {
   return new Promise((resolve, reject) => {
-    exec(`adb -s ${ADB_DEVICE} ${command}`, { timeout: 5000 }, (error, stdout, stderr) => {
+    const cmd = ADB_DEVICE ? `adb -s ${ADB_DEVICE} ${command}` : `adb ${command}`;
+    exec(cmd, { timeout: 5000 }, (error, stdout, stderr) => {
       if (error) {
         reject(stderr || error.message);
       } else {
@@ -34,11 +36,38 @@ function execAdb(command) {
   });
 }
 
+function startScrcpy() {
+  if (scrcpyProcess) return;
+
+  scrcpyProcess = spawn('scrcpy', [
+    '--video-codec=h264',
+    '--max-fps=30',
+    '--max-size=1080',
+    '--no-audio',
+    '--video-bit-rate=2M',
+    '--no-control',
+    '--video-source=display'
+  ]);
+
+  scrcpyProcess.stdout.on('data', (data) => {
+    videoClients.forEach(client => {
+      if (client.readyState === 1) {
+        client.send(data);
+      }
+    });
+  });
+
+  scrcpyProcess.on('close', () => {
+    scrcpyProcess = null;
+  });
+}
+
 wss.on('connection', (ws) => {
-  ws.send(JSON.stringify({ 
-    type: 'info',
-    message: 'Screen streaming unavailable. Use APK install and shell commands.' 
-  }));
+  videoClients.add(ws);
+  
+  if (!scrcpyProcess) {
+    startScrcpy();
+  }
 
   ws.on('message', async (message) => {
     try {
@@ -65,7 +94,11 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    // Cleanup
+    videoClients.delete(ws);
+    if (videoClients.size === 0 && scrcpyProcess) {
+      scrcpyProcess.kill();
+      scrcpyProcess = null;
+    }
   });
 });
 

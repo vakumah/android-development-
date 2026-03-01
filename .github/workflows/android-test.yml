@@ -11,7 +11,7 @@ on:
 
 jobs:
   android-test:
-    runs-on: ubuntu-24.04-arm
+    runs-on: macos-15
     timeout-minutes: 120
     
     steps:
@@ -20,41 +20,53 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y adb wget
+          brew install android-platform-tools scrcpy
 
-      - name: Start Android Container
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK Licenses
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+      - name: Install Android System Image
         run: |
-          docker run -itd --rm --privileged \
-            --name redroid \
-            -p 5555:5555 \
-            redroid/redroid:11.0.0-latest \
-            androidboot.use_memfd=true \
-            androidboot.redroid_gpu_mode=guest
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "system-images;android-30;google_apis;arm64-v8a"
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools"
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "emulator"
+
+      - name: Create AVD
+        run: |
+          echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd \
+            --name test_avd \
+            --package "system-images;android-30;google_apis;arm64-v8a" \
+            --device "pixel_6"
+
+      - name: Start Android Emulator
+        run: |
+          $ANDROID_HOME/emulator/emulator -avd test_avd \
+            -no-snapshot-save \
+            -no-window \
+            -gpu swiftshader_indirect \
+            -noaudio \
+            -no-boot-anim &
           
-          echo "Waiting for Android to boot..."
-          sleep 20
+          echo "Waiting for emulator to boot..."
+          adb wait-for-device
           
-          for i in {1..25}; do
-            adb connect 127.0.0.1:5555 2>&1 | grep -v "already connected" || true
-            sleep 3
-            
-            STATUS=$(adb -s 127.0.0.1:5555 get-state 2>/dev/null || echo "offline")
-            
-            if [ "$STATUS" == "device" ]; then
-              echo "✓ Android is ready!"
-              adb -s 127.0.0.1:5555 shell getprop ro.build.version.release
-              break
-            fi
-            
-            if [ $i -eq 25 ]; then
-              echo "Timeout. Container logs:"
-              docker logs redroid --tail 50
+          timeout=300
+          until adb shell getprop sys.boot_completed | grep -q 1; do
+            echo "Still booting..."
+            sleep 5
+            timeout=$((timeout - 5))
+            if [ $timeout -le 0 ]; then
+              echo "Timeout waiting for boot"
               exit 1
             fi
-            
-            echo "Attempt $i/25 - Status: $STATUS"
           done
+          
+          echo "✓ Android emulator ready!"
+          adb devices
+          adb shell getprop ro.build.version.release
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -72,7 +84,8 @@ jobs:
           sleep 5
           
           echo "Setting up Cloudflare tunnel..."
-          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64 -O cloudflared
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-amd64.tgz
+          tar -xzf cloudflared-darwin-amd64.tgz
           chmod +x cloudflared
           
           ./cloudflared tunnel --url http://localhost:8000 > tunnel.log 2>&1 &
@@ -89,9 +102,11 @@ jobs:
           echo "URL: $URL"
           echo "Runtime: ${{ inputs.runtime_minutes }} minutes"
           echo ""
-          echo "Note: Screen streaming disabled due to"
-          echo "binder limitations. Use APK install and"
-          echo "shell commands for testing."
+          echo "Features:"
+          echo "• Real-time screen streaming"
+          echo "• APK installation"
+          echo "• Touch control"
+          echo "• Shell commands"
           echo "=========================================="
           echo ""
           
@@ -107,5 +122,5 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          docker stop redroid 2>/dev/null || true
-          adb disconnect 127.0.0.1:5555 2>/dev/null || true
+          adb emu kill 2>/dev/null || true
+          pkill -f emulator 2>/dev/null || true

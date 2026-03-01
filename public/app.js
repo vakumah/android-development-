@@ -3,6 +3,7 @@ class AndroidTester {
     this.ws = null;
     this.canvas = document.getElementById('screen');
     this.ctx = this.canvas.getContext('2d');
+    this.videoDecoder = null;
     this.isConnected = false;
     
     this.init();
@@ -18,20 +19,17 @@ class AndroidTester {
   setupWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     this.ws = new WebSocket(`${protocol}//${window.location.host}`);
+    this.ws.binaryType = 'arraybuffer';
 
     this.ws.onopen = () => {
       this.isConnected = true;
-      this.showStatus('Screen streaming unavailable on this platform. Use APK install and shell commands for testing.');
+      this.hideStatus();
+      this.initVideoDecoder();
     };
 
     this.ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'info') {
-          this.showStatus(data.message);
-        }
-      } catch (e) {
-        // Ignore
+      if (event.data instanceof ArrayBuffer) {
+        this.handleVideoData(event.data);
       }
     };
 
@@ -44,6 +42,45 @@ class AndroidTester {
     this.ws.onerror = () => {
       this.showStatus('Connection error');
     };
+  }
+
+  initVideoDecoder() {
+    if (!('VideoDecoder' in window)) {
+      this.showToast('Browser does not support video decoding', 'error');
+      return;
+    }
+
+    this.videoDecoder = new VideoDecoder({
+      output: (frame) => {
+        this.canvas.width = frame.displayWidth;
+        this.canvas.height = frame.displayHeight;
+        this.ctx.drawImage(frame, 0, 0);
+        frame.close();
+      },
+      error: (e) => {
+        console.error('Video decoder error:', e);
+      }
+    });
+
+    this.videoDecoder.configure({
+      codec: 'avc1.42E01E',
+      optimizeForLatency: true
+    });
+  }
+
+  handleVideoData(data) {
+    if (!this.videoDecoder || this.videoDecoder.state !== 'configured') return;
+
+    try {
+      const chunk = new EncodedVideoChunk({
+        type: 'key',
+        timestamp: performance.now(),
+        data: data
+      });
+      this.videoDecoder.decode(chunk);
+    } catch (e) {
+      console.error('Decode error:', e);
+    }
   }
 
   setupEventListeners() {
