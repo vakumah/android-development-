@@ -1,117 +1,40 @@
-name: Android Testing Environment
+name: Android ARM64 Emulator
 
 on:
   workflow_dispatch:
     inputs:
-      runtime_minutes:
-        description: 'Runtime duration (minutes)'
+      apk_url:
+        description: 'URL APK yang mau diinstall (opsional)'
         required: false
-        default: '60'
         type: string
 
 jobs:
-  android-test:
+  emulator:
     runs-on: macos-15
-    timeout-minutes: 120
-    
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Dependencies
-        run: |
-          brew install android-platform-tools scrcpy
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept Android SDK Licenses
-        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-
-      - name: Install Android System Image
-        run: |
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "system-images;android-30;google_apis;arm64-v8a"
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools"
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "emulator"
-
-      - name: Create AVD
-        run: |
-          echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd \
-            --name test_avd \
-            --package "system-images;android-30;google_apis;arm64-v8a" \
-            --device "pixel_6"
-
-      - name: Start Android Emulator
-        run: |
-          nohup $ANDROID_HOME/emulator/emulator -avd test_avd \
-            -no-snapshot-save \
-            -no-window \
-            -gpu swiftshader_indirect \
-            -noaudio \
-            -no-boot-anim \
-            -memory 2048 \
-            -cores 2 > /tmp/emulator.log 2>&1 &
-          
-          echo "Emulator started in background"
-          echo "Waiting 30 seconds for initial startup..."
-          sleep 30
-          
-          adb devices
-          echo "✓ Emulator process running, continuing to web interface..."
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Start emulator dan web viewer
+        uses: ReactiveCircus/android-emulator-runner@v2
         with:
-          node-version: '20'
+          api-level: 31
+          target: google_apis
+          arch: arm64-v8a
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim
+          script: |
+            if [ -n "${{ inputs.apk_url }}" ]; then
+              curl -L -o /tmp/app.apk "${{ inputs.apk_url }}"
+              adb install -r /tmp/app.apk
+            fi
 
-      - name: Install Application
-        run: npm install
+            git clone https://github.com/NetrisTV/ws-scrcpy.git /tmp/ws-scrcpy
+            cd /tmp/ws-scrcpy
+            npm install
+            npm start &
 
-      - name: Start Server & Tunnel
-        run: |
-          echo "Starting web interface..."
-          npm start &
-          SERVER_PID=$!
-          sleep 5
-          
-          echo "Setting up Cloudflare tunnel..."
-          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-amd64.tgz
-          tar -xzf cloudflared-darwin-amd64.tgz
-          chmod +x cloudflared
-          
-          ./cloudflared tunnel --url http://localhost:8000 > tunnel.log 2>&1 &
-          TUNNEL_PID=$!
-          
-          sleep 5
-          
-          URL=$(grep -o 'https://[-a-zA-Z0-9]*\.trycloudflare\.com' tunnel.log | head -n 1)
-          
-          echo ""
-          echo "=========================================="
-          echo "Android Testing Environment"
-          echo "=========================================="
-          echo "URL: $URL"
-          echo "Runtime: ${{ inputs.runtime_minutes }} minutes"
-          echo ""
-          echo "Features:"
-          echo "• Real-time screen streaming"
-          echo "• APK installation"
-          echo "• Touch control"
-          echo "• Shell commands"
-          echo "=========================================="
-          echo ""
-          
-          RUNTIME_SECONDS=$((${{ inputs.runtime_minutes }} * 60))
-          echo "Holding environment for ${{ inputs.runtime_minutes }} minutes..."
-          echo "Press Cancel Workflow button to stop early"
-          
-          sleep $RUNTIME_SECONDS
-          
-          echo "Runtime expired, cleaning up..."
-          kill $SERVER_PID $TUNNEL_PID 2>/dev/null || true
+            brew install cloudflared
+            cloudflared tunnel --url http://localhost:8080 &
 
-      - name: Cleanup
-        if: always()
-        run: |
-          adb emu kill 2>/dev/null || true
-          pkill -f emulator 2>/dev/null || true
+            sleep 21600
