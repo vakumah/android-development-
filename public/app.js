@@ -30,6 +30,15 @@ class AndroidTester {
     this.ws.onmessage = (event) => {
       if (event.data instanceof ArrayBuffer) {
         this.handleVideoData(event.data);
+      } else {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'status') {
+            this.showStatus(data.message);
+          }
+        } catch (e) {
+          // Not JSON, ignore
+        }
       }
     };
 

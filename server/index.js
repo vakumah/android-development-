@@ -39,6 +39,8 @@ function execAdb(command) {
 function startScrcpy() {
   if (scrcpyProcess) return;
 
+  console.log('Starting scrcpy...');
+  
   scrcpyProcess = spawn('scrcpy', [
     '--video-codec=h264',
     '--max-fps=30',
@@ -46,7 +48,8 @@ function startScrcpy() {
     '--no-audio',
     '--video-bit-rate=2M',
     '--no-control',
-    '--video-source=display'
+    '--video-source=display',
+    '--verbosity=error'
   ]);
 
   scrcpyProcess.stdout.on('data', (data) => {
@@ -57,13 +60,35 @@ function startScrcpy() {
     });
   });
 
-  scrcpyProcess.on('close', () => {
+  scrcpyProcess.stderr.on('data', (data) => {
+    console.error('scrcpy error:', data.toString());
+  });
+
+  scrcpyProcess.on('close', (code) => {
+    console.log('scrcpy closed with code:', code);
+    scrcpyProcess = null;
+    
+    // Retry after 5 seconds if device not ready
+    if (videoClients.size > 0) {
+      setTimeout(() => startScrcpy(), 5000);
+    }
+  });
+
+  scrcpyProcess.on('error', (err) => {
+    console.error('scrcpy spawn error:', err);
     scrcpyProcess = null;
   });
 }
 
 wss.on('connection', (ws) => {
+  console.log('WebSocket client connected');
   videoClients.add(ws);
+  
+  // Send initial status
+  ws.send(JSON.stringify({ 
+    type: 'status',
+    message: 'Connecting to Android emulator...' 
+  }));
   
   if (!scrcpyProcess) {
     startScrcpy();
