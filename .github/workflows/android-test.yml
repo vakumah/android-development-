@@ -20,8 +20,7 @@ jobs:
           docker run -d --privileged \
             --name redroid \
             -p 5555:5555 \
-            --platform linux/amd64 \
-            redroid/redroid:12.0.0 \
+            redroid/redroid:12.0.0-amd64 \
             androidboot.hardware=redroid \
             androidboot.redroid_gpu_mode=guest \
             ro.product.cpu.abilist=x86_64,arm64-v8a,x86,armeabi-v7a,armeabi \
@@ -35,11 +34,9 @@ jobs:
           sudo apt install -y adb
       - name: Wait for device online
         run: |
-          echo "Waiting for container to start..."
           sleep 20
           adb connect localhost:5555
           timeout 300 bash -c 'until adb devices | grep -w "device"; do sleep 5; adb connect localhost:5555; done'
-          adb devices
       - name: Test ARM binary
         run: |
           adb shell getprop ro.product.cpu.abi
