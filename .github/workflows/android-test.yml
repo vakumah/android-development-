@@ -13,6 +13,9 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      - name: Load binfmt_misc
+        run: |
+          sudo modprobe binfmt_misc
       - name: Setup binfmt for QEMU
         run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
       - name: Run ReDroid container
@@ -20,14 +23,17 @@ jobs:
           docker run -d --privileged \
             --name redroid \
             -p 5555:5555 \
-            redroid/redroid:12.0.0-amd64 \
+            redroid/redroid:12.0.0-latest \
             androidboot.hardware=redroid \
             androidboot.redroid_gpu_mode=guest \
             ro.product.cpu.abilist=x86_64,arm64-v8a,x86,armeabi-v7a,armeabi \
             ro.product.cpu.abilist64=x86_64,arm64-v8a \
             ro.product.cpu.abilist32=x86,armeabi-v7a,armeabi \
+            ro.dalvik.vm.isa.arm=x86 \
+            ro.dalvik.vm.isa.arm64=x86_64 \
             ro.enable.native.bridge.exec=1 \
-            ro.dalvik.vm.native.bridge=libndk_translation.so
+            ro.dalvik.vm.native.bridge=libndk_translation.so \
+            ro.ndk_translation.version=0.2.2
       - name: Install ADB
         run: |
           sudo apt update
