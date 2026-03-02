@@ -13,9 +13,6 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Load binfmt_misc
-        run: |
-          sudo modprobe binfmt_misc
       - name: Setup binfmt for QEMU
         run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
       - name: Run ReDroid container
@@ -32,23 +29,25 @@ jobs:
             ro.dalvik.vm.isa.arm=x86 \
             ro.dalvik.vm.isa.arm64=x86_64 \
             ro.enable.native.bridge.exec=1 \
-            ro.dalvik.vm.native.bridge=libndk_translation.so \
-            ro.ndk_translation.version=0.2.2
+            ro.dalvik.vm.native.bridge=libndk_translation.so
+      - name: Wait for container to boot
+        run: |
+          sleep 30
+          docker logs redroid
       - name: Install ADB
         run: |
           sudo apt update
           sudo apt install -y adb
-      - name: Wait for device online
+      - name: Connect ADB
         run: |
-          sleep 20
           adb connect localhost:5555
-          timeout 300 bash -c 'until adb devices | grep -w "device"; do sleep 5; adb connect localhost:5555; done'
-      - name: Test ARM binary
+          timeout 300 bash -c 'until adb shell getprop ro.product.cpu.abi > /dev/null 2>&1; do sleep 5; adb connect localhost:5555; done'
+      - name: Verify ARM translation
         run: |
           adb shell getprop ro.product.cpu.abi
           adb shell ls /system/lib64/libndk_translation* || echo 'NDK translation not found'
       - name: Keep alive
         run: sleep 3600
-      - name: Check container logs
+      - name: Container logs
         if: always()
         run: docker logs redroid
